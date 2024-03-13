@@ -1,0 +1,39 @@
+type Car = record {
+  id : nat64;
+  model : text;
+  make : text;
+  year : nat32;
+  available : bool;
+};
+type Error = variant {
+  InvalidInput : record { msg : text };
+  NotFound : record { msg : text };
+};
+type RentalRequest = record {
+  id : nat64;
+  status : RentalStatus;
+  end_date : nat64;
+  customer_id : nat64;
+  start_date : nat64;
+  car_id : nat64;
+};
+type RentalStatus = variant { Active; Completed; Canceled; Pending };
+type Result = variant { Ok : Car; Err : Error };
+type Result_1 = variant { Ok : RentalRequest; Err : Error };
+type Result_2 = variant { Ok; Err : Error };
+service : {
+  add_car : (text, text, nat32) -> (Result);
+  add_rental_request : (nat64, nat64, nat64, nat64, RentalStatus) -> (Result_1);
+  delete_car : (nat64) -> (Result_2);
+  delete_rental_request : (nat64) -> (Result_2);
+  get_car : (nat64) -> (Result) query;
+  get_rental_request : (nat64) -> (Result_1) query;
+  list_cars : () -> (vec Car) query;
+  list_rental_requests : () -> (vec RentalRequest) query;
+  list_rental_requests_for_car : (nat64) -> (vec RentalRequest) query;
+  list_rental_requests_for_customer : (nat64) -> (vec RentalRequest) query;
+  update_car : (nat64, text, text, nat32) -> (Result);
+  update_rental_request : (nat64, nat64, nat64, nat64, nat64, RentalStatus) -> (
+      Result_1,
+    );
+}
