@@ -39,36 +39,25 @@ enum RentalStatus {
     Canceled,
 }
 
-// Implement serialization and deserialization for Car
-impl Storable for Car {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+// Implement serialization and deserialization for Car and RentalRequest
+impl<T> Storable for T
+where
+    T: Serialize + for<'de> Deserialize<'de> + Clone,
+{
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
 
-    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+    fn from_bytes(bytes: Cow<'_, [u8]>) -> Self {
         Decode!(bytes.as_ref(), Self).unwrap()
     }
 }
 
-// Implement bounds for Car serialization
-impl BoundedStorable for Car {
-    const MAX_SIZE: u32 = 1024;
-    const IS_FIXED_SIZE: bool = false;
-}
-
-// Implement serialization and deserialization for RentalRequest
-impl Storable for RentalRequest {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-}
-
-// Implement bounds for RentalRequest serialization
-impl BoundedStorable for RentalRequest {
+// Implement bounds for Car and RentalRequest serialization
+impl<T> BoundedStorable for T
+where
+    T: Serialize + for<'de> Deserialize<'de> + Clone,
+{
     const MAX_SIZE: u32 = 1024;
     const IS_FIXED_SIZE: bool = false;
 }
@@ -105,12 +94,7 @@ enum Error {
 // Implement CRUD operations for cars
 #[ic_cdk::update]
 fn add_car(make: String, model: String, year: u32) -> Result<Car, Error> {
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment id counter");
+    let id = increment_id_counter()?;
 
     let car = Car {
         id,
@@ -120,61 +104,24 @@ fn add_car(make: String, model: String, year: u32) -> Result<Car, Error> {
         available: true,
     };
 
-    CAR_STORAGE.with(|storage| storage.borrow_mut().insert(id, car.clone()));
+    insert_item(&car, &CAR_STORAGE)?;
     Ok(car)
 }
 
 #[ic_cdk::update]
 fn delete_car(id: u64) -> Result<(), Error> {
-    match CAR_STORAGE.with(|storage| storage.borrow_mut().remove(&id)) {
-        Some(_) => Ok(()),
-        None => Err(Error::NotFound {
-            msg: format!("Car with id={} not found", id),
-        }),
-    }
+    remove_item(&id, &CAR_STORAGE)
 }
 
 // Implement query operations for the car rental system
 #[ic_cdk::query]
 fn get_car(id: u64) -> Result<Car, Error> {
-    match CAR_STORAGE.with(|storage| storage.borrow().get(&id)) {
-        Some(car) => Ok(car.clone()),
-        None => Err(Error::NotFound {
-            msg: format!("Car with id={} not found", id),
-        }),
-    }
-}
-
-#[ic_cdk::query]
-fn get_rental_request(id: u64) -> Result<RentalRequest, Error> {
-    match RENTAL_REQUEST_STORAGE.with(|storage| storage.borrow().get(&id)) {
-        Some(rental_request) => Ok(rental_request.clone()),
-        None => Err(Error::NotFound {
-            msg: format!("Rental request with id={} not found", id),
-        }),
-    }
+    get_item(&id, &CAR_STORAGE)
 }
 
 #[ic_cdk::query]
 fn list_cars() -> Vec<Car> {
-    CAR_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .map(|(_, car)| car.clone())
-            .collect()
-    })
-}
-
-#[ic_cdk::query]
-fn list_rental_requests() -> Vec<RentalRequest> {
-    RENTAL_REQUEST_STORAGE.with(|storage| {
-        storage
-            .borrow()
-            .iter()
-            .map(|(_, request)| request.clone())
-            .collect()
-    })
+    list_items(&CAR_STORAGE)
 }
 
 #[ic_cdk::update]
@@ -185,12 +132,7 @@ fn add_rental_request(
     end_date: u64,
     status: RentalStatus,
 ) -> Result<RentalRequest, Error> {
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment id counter");
+    let id = increment_id_counter()?;
 
     let rental_request = RentalRequest {
         id,
@@ -201,82 +143,46 @@ fn add_rental_request(
         status,
     };
 
-    RENTAL_REQUEST_STORAGE
-        .with(|storage| storage.borrow_mut().insert(id, rental_request.clone()));
-
+    insert_item(&rental_request, &RENTAL_REQUEST_STORAGE)?;
     Ok(rental_request)
 }
 
 #[ic_cdk::update]
 fn delete_rental_request(id: u64) -> Result<(), Error> {
-    match RENTAL_REQUEST_STORAGE.with(|storage| storage.borrow_mut().remove(&id)) {
-        Some(_) => Ok(()),
-        None => Err(Error::NotFound {
-            msg: format!("Rental request with id={} not found", id),
-        }),
-    }
+    remove_item(&id, &RENTAL_REQUEST_STORAGE)
 }
 
+#[ic_cdk::query]
+fn get_rental_request(id: u64) -> Result<RentalRequest, Error> {
+    get_item(&id, &RENTAL_REQUEST_STORAGE)
+}
+
+#[ic_cdk::query]
+fn list_rental_requests() -> Vec<RentalRequest> {
+    list_items(&RENTAL_REQUEST_STORAGE)
+}
 
 #[ic_cdk::query]
 fn list_rental_requests_for_car(car_id: u64) -> Vec<RentalRequest> {
-    RENTAL_REQUEST_STORAGE
-        .with(|storage| {
-            storage
-                .borrow()
-                .iter()
-                .filter_map(|(_, request)| {
-                    if request.car_id == car_id {
-                        Some(request.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
+    list_items_by_car(car_id)
 }
 
 #[ic_cdk::query]
 fn list_rental_requests_for_customer(customer_id: u64) -> Vec<RentalRequest> {
-    RENTAL_REQUEST_STORAGE
-        .with(|storage| {
-            storage
-                .borrow()
-                .iter()
-                .filter_map(|(_, request)| {
-                    if request.customer_id == customer_id {
-                        Some(request.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
+    list_items_by_customer(customer_id)
 }
 
 #[ic_cdk::update]
 fn update_car(id: u64, make: String, model: String, year: u32) -> Result<Car, Error> {
-    match CAR_STORAGE.with(|storage| {
-        let mut storage = storage.borrow_mut();
-        if let Some(car) = storage.get(&id) {
-            // Create a cloned copy of the car to update
-            let mut updated_car = car.clone();
-            // Update the car fields
-            updated_car.make = make;
-            updated_car.model = model;
-            updated_car.year = year;
-            // Replace the old car with the updated one
-            storage.insert(id, updated_car.clone());
-            Ok(updated_car)
-        } else {
-            Err(Error::NotFound {
-                msg: format!("Car with id={} not found", id),
-            })
-        }
-    }) {
-        Ok(car) => Ok(car),
-        Err(e) => Err(e),
-    }
+    update_item(
+        &id,
+        &|car: &mut Car| {
+            car.make = make.clone();
+            car.model = model.clone();
+            car.year = year;
+        },
+        &CAR_STORAGE,
+    )
 }
 
 #[ic_cdk::update]
@@ -288,33 +194,124 @@ fn update_rental_request(
     end_date: u64,
     status: RentalStatus,
 ) -> Result<RentalRequest, Error> {
-    match RENTAL_REQUEST_STORAGE.with(|storage| {
-        let mut storage = storage.borrow_mut();
-        if let Some(rental_request) = storage.get(&id) {
-            // Create a cloned copy of the rental request to update
-            let mut updated_rental_request = rental_request.clone();
-            // Update the rental request fields
-            updated_rental_request.car_id = car_id;
-            updated_rental_request.customer_id = customer_id;
-            updated_rental_request.start_date = start_date;
-            updated_rental_request.end_date = end_date;
-            updated_rental_request.status = status;
-            // Replace the old rental request with the updated one
-            storage.insert(id, updated_rental_request.clone());
-            Ok(updated_rental_request)
-        } else {
-            Err(Error::NotFound {
-                msg: format!("Rental request with id={} not found", id),
-            })
-        }
-    }) {
-        Ok(rental_request) => Ok(rental_request),
-        Err(e) => Err(e),
-    }
+    update_item(
+        &id,
+        &|rental_request: &mut RentalRequest| {
+            rental_request.car_id = car_id;
+            rental_request.customer_id = customer_id;
+            rental_request.start_date = start_date;
+            rental_request.end_date = end_date;
+            rental_request.status = status;
+        },
+        &RENTAL_REQUEST_STORAGE,
+    )
 }
 
-// Error handling
-// Implement error handling for the functions above
+// Helper function to increment ID counter
+fn increment_id_counter() -> Result<u64, Error> {
+    ID_COUNTER
+        .with(|counter| {
+            let current_value = *counter.borrow().get();
+            counter.borrow_mut().set(current_value + 1)
+        })
+        .map_err(|_| Error::InvalidInput {
+            msg: "Failed to increment ID counter".to_string(),
+        })
+}
 
+// Helper function to insert item into storage
+fn insert_item<T>(item: &T, storage: &RefCell<StableBTreeMap<u64, T, Memory>>) -> Result<(), Error>
+where
+    T: Clone + BoundedStorable,
+{
+    storage
+        .with(|storage| storage.borrow_mut().insert(item.id, item.clone()))
+        .map(|_| ())
+        .map_err(|_| Error::InvalidInput {
+            msg: "Failed to insert item into storage".to_string(),
+        })
+}
+
+// Helper function to remove item from storage
+fn remove_item<T>(id: &u64, storage: &RefCell<StableBTreeMap<u64, T, Memory>>) -> Result<(), Error> {
+    storage
+        .with(|storage| {
+            storage
+                .borrow_mut()
+                .remove(id)
+                .ok_or(Error::NotFound { msg: format!("Item with id={} not found", id) })
+        })
+        .map(|_| ())
+}
+
+// Helper function to get item from storage
+fn get_item<T>(id: &u64, storage: &RefCell<StableBTreeMap<u64, T, Memory>>) -> Result<T, Error>
+where
+    T: Clone,
+{
+    storage
+        .with(|storage| {
+            storage
+                .borrow()
+                .get(id)
+                .cloned()
+                .ok_or(Error::NotFound { msg: format!("Item with id={} not found", id) })
+        })
+}
+
+// Helper function to list all items from storage
+fn list_items<T>(storage: &RefCell<StableBTreeMap<u64, T, Memory>>) -> Vec<T>
+where
+    T: Clone,
+{
+    storage.with(|storage| storage.borrow().values().cloned().collect())
+}
+
+// Helper function to list items by car ID
+fn list_items_by_car(car_id: u64) -> Vec<RentalRequest> {
+    RENTAL_REQUEST_STORAGE
+        .with(|storage| {
+            storage
+                .borrow()
+                .values()
+                .filter(|request| request.car_id == car_id)
+                .cloned()
+                .collect()
+        })
+}
+
+// Helper function to list items by customer ID
+fn list_items_by_customer(customer_id: u64) -> Vec<RentalRequest> {
+    RENTAL_REQUEST_STORAGE
+        .with(|storage| {
+            storage
+                .borrow()
+                .values()
+                .filter(|request| request.customer_id == customer_id)
+                .cloned()
+                .collect()
+        })
+}
+
+// Helper function to update item in storage
+fn update_item<T, F>(
+    id: &u64,
+    updater: &F,
+    storage: &RefCell<StableBTreeMap<u64, T, Memory>>,
+) -> Result<T, Error>
+where
+    T: Clone + BoundedStorable,
+    F: Fn(&mut T),
+{
+    storage
+        .with(|storage| {
+            storage.borrow_mut().entry(*id).and_modify(|entry| updater(entry));
+            storage
+                .borrow()
+                .get(id)
+                .cloned()
+                .ok_or(Error::NotFound { msg: format!("Item with id={} not found", id) })
+        })
+}
 // Export the Candid interface
 ic_cdk::export_candid!();
