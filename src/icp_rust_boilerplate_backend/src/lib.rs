@@ -103,8 +103,17 @@ enum Error {
 }
 
 // Implement CRUD operations for cars
+
 #[ic_cdk::update]
 fn add_car(make: String, model: String, year: u32) -> Result<Car, Error> {
+    // Ensure input fields are not empty
+    if make.is_empty() || model.is_empty() {
+        return Err(Error::InvalidInput {
+            msg: "Make or model cannot be empty".to_string(),
+        });
+    }
+
+    // Increment ID counter
     let id = ID_COUNTER
         .with(|counter| {
             let current_value = *counter.borrow().get();
@@ -123,6 +132,120 @@ fn add_car(make: String, model: String, year: u32) -> Result<Car, Error> {
     CAR_STORAGE.with(|storage| storage.borrow_mut().insert(id, car.clone()));
     Ok(car)
 }
+
+#[ic_cdk::update]
+fn update_car(id: u64, make: String, model: String, year: u32) -> Result<Car, Error> {
+    // Ensure input fields are not empty
+    if make.is_empty() || model.is_empty() {
+        return Err(Error::InvalidInput {
+            msg: "Make or model cannot be empty".to_string(),
+        });
+    }
+
+    match CAR_STORAGE.with(|storage| {
+        let mut storage = storage.borrow_mut();
+        if let Some(car) = storage.get(&id) {
+            // Create a cloned copy of the car to update
+            let mut updated_car = car.clone();
+            // Update the car fields
+            updated_car.make = make;
+            updated_car.model = model;
+            updated_car.year = year;
+            // Replace the old car with the updated one
+            storage.insert(id, updated_car.clone());
+            Ok(updated_car)
+        } else {
+            Err(Error::InvalidInput {
+                msg: format!("Car with id={} not found", id),
+            })
+        }
+    }) {
+        Ok(car) => Ok(car),
+        Err(e) => Err(e),
+    }
+}
+
+#[ic_cdk::update]
+fn add_rental_request(
+    car_id: u64,
+    customer_id: u64,
+    start_date: u64,
+    end_date: u64,
+    status: RentalStatus,
+) -> Result<RentalRequest, Error> {
+    // Ensure input fields are not empty
+    if start_date == 0 || end_date == 0 {
+        return Err(Error::InvalidInput {
+            msg: "Start date or end date cannot be empty".to_string(),
+        });
+    }
+
+    let id = ID_COUNTER
+        .with(|counter| {
+            let current_value = *counter.borrow().get();
+            counter.borrow_mut().set(current_value + 1)
+        })
+        .expect("Cannot increment id counter");
+
+    let rental_request = RentalRequest {
+        id,
+        car_id,
+        customer_id,
+        start_date,
+        end_date,
+        status,
+    };
+
+    RENTAL_REQUEST_STORAGE
+        .with(|storage| storage.borrow_mut().insert(id, rental_request.clone()));
+
+    Ok(rental_request)
+}
+
+#[ic_cdk::update]
+fn update_rental_request(
+    id: u64,
+    car_id: u64,
+    customer_id: u64,
+    start_date: u64,
+    end_date: u64,
+    status: RentalStatus,
+) -> Result<RentalRequest, Error> {
+    // Ensure input fields are not empty
+    if start_date == 0 || end_date == 0 {
+        return Err(Error::InvalidInput {
+            msg: "Start date or end date cannot be empty".to_string(),
+        });
+    }
+
+    match RENTAL_REQUEST_STORAGE.with(|storage| {
+        let mut storage = storage.borrow_mut();
+        if let Some(rental_request) = storage.get(&id) {
+            // Create a cloned copy of the rental request to update
+            let mut updated_rental_request = rental_request.clone();
+            // Update the rental request fields
+            updated_rental_request.car_id = car_id;
+            updated_rental_request.customer_id = customer_id;
+            updated_rental_request.start_date = start_date;
+            updated_rental_request.end_date = end_date;
+            updated_rental_request.status = status;
+            // Replace the old rental request with the updated one
+            storage.insert(id, updated_rental_request.clone());
+            Ok(updated_rental_request)
+        } else {
+            Err(Error::InvalidInput {
+                msg: format!("Rental request with id={} not found", id),
+            })
+        }
+    }) {
+        Ok(rental_request) => Ok(rental_request),
+        Err(e) => Err(e),
+    }
+}
+
+
+
+
 
 #[ic_cdk::update]
 fn delete_car(id: u64) -> Result<(), Error> {
@@ -177,35 +300,6 @@ fn list_rental_requests() -> Vec<RentalRequest> {
     })
 }
 
-#[ic_cdk::update]
-fn add_rental_request(
-    car_id: u64,
-    customer_id: u64,
-    start_date: u64,
-    end_date: u64,
-    status: RentalStatus,
-) -> Result<RentalRequest, Error> {
-    let id = ID_COUNTER
-        .with(|counter| {
-            let current_value = *counter.borrow().get();
-            counter.borrow_mut().set(current_value + 1)
-        })
-        .expect("Cannot increment id counter");
-
-    let rental_request = RentalRequest {
-        id,
-        car_id,
-        customer_id,
-        start_date,
-        end_date,
-        status,
-    };
-
-    RENTAL_REQUEST_STORAGE
-        .with(|storage| storage.borrow_mut().insert(id, rental_request.clone()));
-
-    Ok(rental_request)
-}
 
 #[ic_cdk::update]
 fn delete_rental_request(id: u64) -> Result<(), Error> {
@@ -254,64 +348,6 @@ fn list_rental_requests_for_customer(customer_id: u64) -> Vec<RentalRequest> {
         })
 }
 
-#[ic_cdk::update]
-fn update_car(id: u64, make: String, model: String, year: u32) -> Result<Car, Error> {
-    match CAR_STORAGE.with(|storage| {
-        let mut storage = storage.borrow_mut();
-        if let Some(car) = storage.get(&id) {
-            // Create a cloned copy of the car to update
-            let mut updated_car = car.clone();
-            // Update the car fields
-            updated_car.make = make;
-            updated_car.model = model;
-            updated_car.year = year;
-            // Replace the old car with the updated one
-            storage.insert(id, updated_car.clone());
-            Ok(updated_car)
-        } else {
-            Err(Error::NotFound {
-                msg: format!("Car with id={} not found", id),
-            })
-        }
-    }) {
-        Ok(car) => Ok(car),
-        Err(e) => Err(e),
-    }
-}
-
-#[ic_cdk::update]
-fn update_rental_request(
-    id: u64,
-    car_id: u64,
-    customer_id: u64,
-    start_date: u64,
-    end_date: u64,
-    status: RentalStatus,
-) -> Result<RentalRequest, Error> {
-    match RENTAL_REQUEST_STORAGE.with(|storage| {
-        let mut storage = storage.borrow_mut();
-        if let Some(rental_request) = storage.get(&id) {
-            // Create a cloned copy of the rental request to update
-            let mut updated_rental_request = rental_request.clone();
-            // Update the rental request fields
-            updated_rental_request.car_id = car_id;
-            updated_rental_request.customer_id = customer_id;
-            updated_rental_request.start_date = start_date;
-            updated_rental_request.end_date = end_date;
-            updated_rental_request.status = status;
-            // Replace the old rental request with the updated one
-            storage.insert(id, updated_rental_request.clone());
-            Ok(updated_rental_request)
-        } else {
-            Err(Error::NotFound {
-                msg: format!("Rental request with id={} not found", id),
-            })
-        }
-    }) {
-        Ok(rental_request) => Ok(rental_request),
-        Err(e) => Err(e),
-    }
-}
 
 // Error handling
 // Implement error handling for the functions above
